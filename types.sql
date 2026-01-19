@@ -82,7 +82,7 @@ create or replace type kursant_type as object (
     historia_jazd   lista_lekcji_type,
     
     member function status_kursu return number,
-    member function lista_lekcji return varchar2
+    member function lista_lekcji return sys_refcursor
 );
 /
 
@@ -100,51 +100,24 @@ create or replace type body kursant_type as
         
         return suma_godzin;
     end status_kursu;
-    
-    member function lista_lekcji return varchar2 is
-        wynik           varchar2(5000);
-        instruktor      instruktor_type;
-        czy_istnieje    boolean := false;
+
+    member function lista_lekcji return sys_refcursor is
+        kursor sys_refcursor;
     begin
-        wynik := 'Imię i Nazwisko: ' || self.imie || ' ' || self.nazwisko || chr(10) ||
-                   'Numer PKK: ' || self.nr_pkk || chr(10) || chr(10) ||
-                   '-------- Zaplanowane jazdy --------' || chr(10);
-
-        if self.historia_jazd is null or self.historia_jazd.count = 0 then
-            return wynik || 'Brak zaplanowanych jazd.';
-        end if;
-
-        for i in 1..self.historia_jazd.count loop
-            if self.historia_jazd(i).data_jazdy > sysdate then
-                czy_istnieje := true;
+        open kursor for
+            select 
+                t.data_jazdy,
+                t.czas_trwania,
+                t.typ_lekcji,
+                t.ref_instruktor.imie || ' ' || t.ref_instruktor.nazwisko as instruktor,
+                t.ref_pojazd.model as pojazd_model,
+                t.ref_pojazd.nr_rejestracyjny as pojazd_nr_rej
+            from 
+                table(self.historia_jazd) t
+            where
+                t.data_jazdy > sysdate;
                 
-                begin
-                    select deref(self.historia_jazd(i).ref_instruktor) 
-                    into instruktor 
-                    from dual;
-                exception
-                    when others then
-                        instruktor := null;
-                end;
-
-                wynik := wynik || 
-                         '[' || to_char(self.historia_jazd(i).data_jazdy, 'dd.mm.yyyy hh24:mi') || '] ' ||
-                         self.historia_jazd(i).czas_trwania || 'h (' || 
-                         initcap(self.historia_jazd(i).typ_lekcji) || ') 
-                         - Instruktor: ' ||
-                           case 
-                               when instruktor is not null then instruktor.imie || ' ' || instruktor.nazwisko 
-                               else 'Nieznany' 
-                           end ||
-                         chr(10);
-            end if;
-        end loop;
-
-        if not czy_istnieje then
-            return 'Brak zaplanowanych jazd.';
-        end if;
-
-        return wynik;
+        return kursor;
     end lista_lekcji;
 end;
 /
