@@ -23,7 +23,7 @@ create or replace type pojazd_type as object (
     nr_rejestracyjny    varchar2(15),
     model               varchar2(50),
     przebieg            number,
-    dostepny            char(1),
+    dostepny            varchar2(3),
     historia_serwisow   lista_serwisow_type,
 
     member procedure aktualizuj_przebieg(nowy_przebieg number)
