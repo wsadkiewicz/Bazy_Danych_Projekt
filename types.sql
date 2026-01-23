@@ -19,14 +19,15 @@ create or replace type serwis_type as object (
 create or replace type lista_serwisow_type as table of serwis_type;
 /
 
+
 create or replace type pojazd_type as object (
     nr_rejestracyjny    varchar2(15),
     model               varchar2(50),
     przebieg            number,
-    dostepny            varchar2(3),
+    dostepny            varchar2(3),    -- tak/nie
     historia_serwisow   lista_serwisow_type,
 
-    member procedure aktualizuj_przebieg(nowy_przebieg number)
+    member procedure    aktualizuj_przebieg(nowy_przebieg number)
 );
 /
 
@@ -40,26 +41,27 @@ create or replace type body pojazd_type as
 end;
 /
 
+
 create or replace type instruktor_type as object (
     id_instruktora   number,
     imie             varchar2(50),
     nazwisko         varchar2(50)
-
-    -- [NOTKA] lista_lekcji dla instruktora lepiej przenieść do pakietu bo odnosi się do tabeli kursanci_tab
-    -- member function lista_lekcji return sys_refcursor
 );
 /
 
-create or replace type lekcja_type as object (
-    data_jazdy     date,
-    czas_trwania   number,
-    ref_instruktor ref instruktor_type,
-    ref_pojazd     ref pojazd_type,
-    przebieg_auta  number,
-    typ_lekcji     varchar2(20),
-    czy_odbyta     varchar2(3),
 
-    member procedure zakoncz_jazde(nowy_przebieg number)
+create or replace type lekcja_type as object (
+    data_jazdy          date,
+    godzina_jazdy       number,
+    czas_trwania        number,
+    ref_instruktor      ref instruktor_type,
+    ref_pojazd          ref pojazd_type,
+    przebieg_auta       number,
+    typ_lekcji          varchar2(20),    -- plac/miasto
+    czy_odbyta          varchar2(3),     -- tak/nie
+
+    member procedure    zakoncz_jazde(nowy_przebieg number),
+    member function     informacje return varchar2
 );
 /
 
@@ -69,11 +71,33 @@ create or replace type body lekcja_type as
         self.czy_odbyta := 'tak';
         self.przebieg_auta := nowy_przebieg;
     end;
+    
+    member function informacje return varchar2 is
+        v_pojazd_ref  pojazd_type;
+        v_nr_rej      varchar2(15);
+        v_tekst       varchar2(400);
+    begin
+        if self.ref_pojazd is not null then
+            select deref(self.ref_pojazd) into v_pojazd_ref from dual;
+
+            if v_pojazd_ref is not null then
+                v_nr_rej := v_pojazd_ref.nr_rejestracyjny;
+            end if;
+        end if;
+
+        v_tekst := 'Data: ' || to_char(self.data_jazdy, 'yyyy-mm-dd') || ' ' || self.godzina_jazdy || ':00' ||
+                   ' | Czas: ' || self.czas_trwania || 'h' || 
+                   ' | Typ: ' || self.typ_lekcji || 
+                   ' | Pojazd: ' || v_nr_rej;
+                   
+        return v_tekst;
+    end informacje;
 end;
 /
 
 create or replace type lista_lekcji_type as table of lekcja_type;
 /
+
 
 create or replace type kursant_type as object (
     nr_pkk          varchar2(20),
@@ -81,8 +105,7 @@ create or replace type kursant_type as object (
     nazwisko        varchar2(50),
     historia_jazd   lista_lekcji_type,
     
-    member function status_kursu return number,
-    member function lista_lekcji return varchar2
+    member function status_kursu return number
 );
 /
 
@@ -100,51 +123,5 @@ create or replace type body kursant_type as
         
         return suma_godzin;
     end status_kursu;
-    
-    member function lista_lekcji return varchar2 is
-        wynik           varchar2(5000);
-        instruktor      instruktor_type;
-        czy_istnieje    boolean := false;
-    begin
-        wynik := 'Imię i Nazwisko: ' || self.imie || ' ' || self.nazwisko || chr(10) ||
-                   'Numer PKK: ' || self.nr_pkk || chr(10) || chr(10) ||
-                   '-------- Zaplanowane jazdy --------' || chr(10);
-
-        if self.historia_jazd is null or self.historia_jazd.count = 0 then
-            return wynik || 'Brak zaplanowanych jazd.';
-        end if;
-
-        for i in 1..self.historia_jazd.count loop
-            if self.historia_jazd(i).data_jazdy > sysdate then
-                czy_istnieje := true;
-                
-                begin
-                    select deref(self.historia_jazd(i).ref_instruktor) 
-                    into instruktor 
-                    from dual;
-                exception
-                    when others then
-                        instruktor := null;
-                end;
-
-                wynik := wynik || 
-                         '[' || to_char(self.historia_jazd(i).data_jazdy, 'dd.mm.yyyy hh24:mi') || '] ' ||
-                         self.historia_jazd(i).czas_trwania || 'h (' || 
-                         initcap(self.historia_jazd(i).typ_lekcji) || ') 
-                         - Instruktor: ' ||
-                           case 
-                               when instruktor is not null then instruktor.imie || ' ' || instruktor.nazwisko 
-                               else 'Nieznany' 
-                           end ||
-                         chr(10);
-            end if;
-        end loop;
-
-        if not czy_istnieje then
-            return 'Brak zaplanowanych jazd.';
-        end if;
-
-        return wynik;
-    end lista_lekcji;
 end;
 /
