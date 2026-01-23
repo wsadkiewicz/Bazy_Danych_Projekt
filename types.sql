@@ -61,7 +61,8 @@ create or replace type lekcja_type as object (
     czy_odbyta          varchar2(3),     -- tak/nie
 
     member procedure    zakoncz_jazde(nowy_przebieg number),
-    member function     informacje return varchar2
+    member function     informacje return varchar2,
+    member function     czy_przyszla return boolean
 );
 /
 
@@ -92,6 +93,14 @@ create or replace type body lekcja_type as
                    
         return v_tekst;
     end informacje;
+    
+    member function czy_przyszla return boolean is
+        v_data date;
+    begin
+        v_data := self.data_jazdy + (self.godzina_jazdy / 24);
+        
+        return v_data > sysdate;
+    end czy_przyszla;
 end;
 /
 

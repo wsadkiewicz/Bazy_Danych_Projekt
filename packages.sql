@@ -158,10 +158,36 @@ create or replace package body kursant_pkg as
     end zakoncz_jazde;
     
     
-    procedure lista_lekcji(p_pkk varchar2) is
+    procedure lista_lekcji(p_pkk varchar2)is
+        v_kursant       kursant_type;
+        v_znaleziono    boolean := false;
     begin
-        null;
-    end;
+        select value(k) into v_kursant
+        from kursanci_tab k
+        where k.nr_pkk = p_pkk;
+    
+        dbms_output.put_line('Imię i Nazwisko: ' || v_kursant.imie || ' ' || v_kursant.nazwisko);
+        dbms_output.put_line('Numer PKK: ' || v_kursant.nr_pkk);
+        dbms_output.put_line('');
+        dbms_output.put_line('------------------------ Zaplanowane jazdy ------------------------');
+    
+        if v_kursant.historia_jazd is not null then
+            for i in 1..v_kursant.historia_jazd.count loop
+                if v_kursant.historia_jazd(i).czy_przyszla() then
+                    dbms_output.put_line(v_kursant.historia_jazd(i).informacje());
+                    v_znaleziono := true;       
+                end if; 
+            end loop;
+        end if;
+    
+        if not v_znaleziono then
+            dbms_output.put_line('(Brak nadchodzących jazd)');
+        end if;
+    
+    exception
+        when no_data_found then
+            raise_application_error(-20003, '[Błąd] Nie znaleziono kursanta o PKK ' || p_pkk);
+    end lista_lekcji;
     
     
     function status_kursu(p_pkk varchar2) return number  is
@@ -179,70 +205,69 @@ create or replace package body kursant_pkg as
     
     
     procedure wygeneruj_raport(p_pkk varchar2) is 
-    v_kursant       kursant_type;
-    v_suma          number;
-    v_instruktor    varchar2(100);
-    v_data          date;
+        v_kursant       kursant_type;
+        v_suma          number;
+        v_instruktor    varchar2(100);
+        v_data          date;
+    begin
+        begin
+            select value(k) into v_kursant 
+            from kursanci_tab k 
+            where k.nr_pkk = p_pkk;
+            
+            v_suma := v_kursant.status_kursu();
+            
+        exception
+            when no_data_found then
+                raise_application_error(-20002, '[Błąd] Nie znaleziono kursanta o PKK ' || p_pkk);
+                return;
+        end;
     
-begin
-    begin
-        select value(k) into v_kursant 
-        from kursanci_tab k 
-        where k.nr_pkk = p_pkk;
-        
-        v_suma := v_kursant.status_kursu();
-        
-    exception
-        when no_data_found then
-            raise_application_error(-20002, '[Błąd] Nie znaleziono kursanta o PKK ' || p_pkk);
+        if v_suma < 30 then
+            dbms_output.put_line('-----------------------------------------------');
+            dbms_output.put_line('Kursant nie posiada wymaganej liczby godzin');
+            dbms_output.put_line('-----------------------------------------------');
+            dbms_output.put_line(' Kursant: ' || v_kursant.imie || ' ' || v_kursant.nazwisko);
+            dbms_output.put_line('-----------------------------------------------');
+            dbms_output.put_line(' Wyjeżdżone godziny: ' || v_suma || 'h');
+            dbms_output.put_line(' Brakuje:            ' || (30 - v_suma) || 'h');
             return;
-    end;
-
-    if v_suma < 30 then
-        dbms_output.put_line('-----------------------------------------------');
-        dbms_output.put_line('Kursant nie posiada wymaganej liczby godzin');
-        dbms_output.put_line('-----------------------------------------------');
-        dbms_output.put_line(' Kursant: ' || v_kursant.imie || ' ' || v_kursant.nazwisko);
-        dbms_output.put_line('-----------------------------------------------');
-        dbms_output.put_line(' Wyjeżdżone godziny: ' || v_suma || 'h');
-        dbms_output.put_line(' Brakuje:            ' || (30 - v_suma) || 'h');
-        return;
-    end if;
-
-    begin
-        select 
-            t.ref_instruktor.imie || ' ' || t.ref_instruktor.nazwisko,
-            t.data_jazdy
-        into 
-            v_instruktor, v_data
-        from 
-            TABLE(v_kursant.historia_jazd) t
-        where 
-            t.czy_odbyta = 'tak'
-        order by 
-            t.data_jazdy desc
-        fetch first 1 row only;
-        
-    exception
-        when no_data_found then
-           raise_application_error(-20002, '[Błąd] Nie znaleziono wymaganych danych do rapotu');
-    end;
-
-    dbms_output.put_line('');
-    dbms_output.put_line('##########################################');
-    dbms_output.put_line('#        RAPORT UKOŃCZENIA KURSU         #');
-    dbms_output.put_line('##########################################');
-    dbms_output.put_line('');
-    dbms_output.put_line(' DANE KURSANTA:');
-    dbms_output.put_line(' ' || rpad('Imię i Nazwisko:', 20) || v_kursant.imie || ' ' || v_kursant.nazwisko);
-    dbms_output.put_line(' ' || rpad('Numer PKK:', 20) || v_kursant.nr_pkk);
-    dbms_output.put_line('------------------------------------------');
-    dbms_output.put_line(' PODSUMOWANIE:');
-    dbms_output.put_line(' ' || rpad('Suma godzin:', 20) || v_suma);
-    dbms_output.put_line(' ' || rpad('Status:', 20) || 'POZYTYWNY');
-    dbms_output.put_line('------------------------------------------');
-    dbms_output.put_line(' ' || rpad('Data:', 20) || to_char(v_data, 'YYYY-MM-DD'));
-    dbms_output.put_line(' ' || rpad('Instruktor:', 20) || v_instruktor);
+        end if;
+    
+        begin
+            select 
+                t.ref_instruktor.imie || ' ' || t.ref_instruktor.nazwisko,
+                t.data_jazdy
+            into 
+                v_instruktor, v_data
+            from 
+                TABLE(v_kursant.historia_jazd) t
+            where 
+                t.czy_odbyta = 'tak'
+            order by 
+                t.data_jazdy desc
+            fetch first 1 row only;
+            
+        exception
+            when no_data_found then
+               raise_application_error(-20002, '[Błąd] Nie znaleziono wymaganych danych do rapotu');
+        end;
+    
+        dbms_output.put_line('');
+        dbms_output.put_line('##########################################');
+        dbms_output.put_line('#        RAPORT UKOŃCZENIA KURSU         #');
+        dbms_output.put_line('##########################################');
+        dbms_output.put_line('');
+        dbms_output.put_line(' DANE KURSANTA:');
+        dbms_output.put_line(' ' || rpad('Imię i Nazwisko:', 20) || v_kursant.imie || ' ' || v_kursant.nazwisko);
+        dbms_output.put_line(' ' || rpad('Numer PKK:', 20) || v_kursant.nr_pkk);
+        dbms_output.put_line('------------------------------------------');
+        dbms_output.put_line(' PODSUMOWANIE:');
+        dbms_output.put_line(' ' || rpad('Suma godzin:', 20) || v_suma);
+        dbms_output.put_line(' ' || rpad('Status:', 20) || 'POZYTYWNY');
+        dbms_output.put_line('------------------------------------------');
+        dbms_output.put_line(' ' || rpad('Data:', 20) || to_char(v_data, 'YYYY-MM-DD'));
+        dbms_output.put_line(' ' || rpad('Instruktor:', 20) || v_instruktor);
        
     end wygeneruj_raport;
 end kursant_pkg;
