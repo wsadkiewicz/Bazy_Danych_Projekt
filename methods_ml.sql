@@ -1,12 +1,18 @@
 create or replace package szkola_jazdy_pkg as
     procedure dodaj_instruktora(p_id number, p_imie varchar2, p_nazwisko varchar2);
+    procedure usun_instruktora(p_id_instruktora number);
+    procedure lista_lekcji_instruktora(p_id_instr number);
+    
     procedure dodaj_pojazd(p_nr_rej varchar2, p_model varchar2, p_przebieg number);
+    procedure usun_pojazd(p_nr_rejestracyjny varchar2);
+    
     procedure zmien_status_pojazdu(p_nr_rej varchar2, p_dostepnosc varchar2);
     function sprawdz_serwis(p_nr_rej varchar2) return varchar2;
+    
     procedure zarejestruj_kursanta(p_nr_pkk varchar2, p_imie varchar2, p_nazwisko varchar2);
     procedure wyrejestruj_kursanta(p_nr_pkk varchar2);
     
-    procedure dodaj_jazde(p_nr_pkk varchar2, p_nr_rej varchar2, p_id_instr number, p_godziny number, p_typ_lekcji varchar2, p_data_jazdy date);
+    procedure dodaj_jazde(p_nr_pkk varchar2, p_nr_rej varchar2, p_id_instr number, p_godziny number, p_typ_lekcji varchar2, p_data_jazdy date, p_godzina_start  number);
     procedure zakoncz_lekcje(p_nr_pkk varchar2, data date, p_przebieg number);
     
     function status_kursu(p_nr_pkk varchar2) return number;
@@ -15,6 +21,66 @@ end szkola_jazdy_pkg;
 /
 
 create or replace package body szkola_jazdy_pkg as
+
+    procedure lista_lekcji_instruktora(
+        p_id_instr number
+    ) is
+        v_ref_instr ref instruktor_type;
+        v_imie      instruktorzy_tab.imie%type;
+        v_nazwisko  instruktorzy_tab.nazwisko%type;
+    begin
+        -- pobranie REF + danych instruktora
+        select ref(i), i.imie, i.nazwisko
+        into v_ref_instr, v_imie, v_nazwisko
+        from instruktorzy_tab i
+        where i.id_instruktora = p_id_instr;
+    
+        dbms_output.put_line(
+            'Zaplanowane lekcje instruktora: '
+            || v_imie || ' ' || v_nazwisko
+        );
+        dbms_output.put_line(
+            '--------------------------------------------'
+        );
+    
+        for r in (
+            select
+                k.nr_pkk,
+                l.data_jazdy,
+                l.czas_trwania,
+                l.typ_lekcji,
+                p.nr_rejestracyjny
+            from kursanci_tab k,
+                 table(k.historia_jazd) l,
+                 pojazdy_tab p
+            where l.ref_instruktor = v_ref_instr
+              and l.czy_odbyta = 'nie'
+              and l.ref_pojazd = ref(p)
+            order by l.data_jazdy
+        ) loop
+            dbms_output.put_line(
+                'PKK: ' || r.nr_pkk ||
+                ' | Data: ' || to_char(r.data_jazdy, 'YYYY-MM-DD HH24:MI') ||
+                ' | Czas: ' || r.czas_trwania || 'h' ||
+                ' | Typ: ' || r.typ_lekcji ||
+                ' | Auto: ' || r.nr_rejestracyjny
+            );
+        end loop;
+    
+    exception
+        when no_data_found then
+            raise_application_error(
+                -20200,
+                'Nie znaleziono instruktora o podanym ID'
+            );
+    end lista_lekcji_instruktora;
+
+
+
+
+
+
+
     procedure dodaj_instruktora(p_id number, p_imie varchar2, p_nazwisko varchar2) is
     begin
         insert into instruktorzy_tab 
@@ -44,6 +110,15 @@ create or replace package body szkola_jazdy_pkg as
             raise_application_error(-20001, 'Pojazd o podanym numerze rejestracyjnym już istnieje.');
     end dodaj_pojazd;
 
+    procedure usun_pojazd(p_nr_rejestracyjny varchar2) is
+    begin
+        delete pojazdy_tab
+        where nr_rejestracyjny = p_nr_rejestracyjny;
+    
+        if sql%rowcount = 0 then
+            raise_application_error(-20002, 'Nie znaleziono pojazdu o podanym numerze ID.');
+        end if;
+    end usun_pojazd;
     
     
     procedure zmien_status_pojazdu(p_nr_rej varchar2, p_dostepnosc varchar2) is
@@ -114,20 +189,63 @@ create or replace package body szkola_jazdy_pkg as
         end if;
     end wyrejestruj_kursanta;
 
+    procedure usun_instruktora(p_id_instruktora number) is
+    begin
+        delete from instruktorzy_tab
+        where id_instruktora = p_id_instruktora;
+    
+        if sql%rowcount = 0 then
+            raise_application_error(-20002, 'Nie znaleziono instruktora o podanym numerze ID.');
+        end if;
+    end usun_instruktora;
 
     
     
     procedure dodaj_jazde(
-        p_nr_pkk varchar2,
-        p_nr_rej varchar2,
-        p_id_instr number,
-        p_godziny number,
-        p_typ_lekcji varchar2,
-        p_data_jazdy date
+        p_nr_pkk         varchar2,
+        p_nr_rej         varchar2,
+        p_id_instr       number,
+        p_godziny        number,
+        p_typ_lekcji     varchar2,
+        p_data_jazdy     date,    
+        p_godzina_start  number    
     ) is
-        v_ref_instr  ref instruktor_type;
-        v_ref_pojazd ref pojazd_type;
+        v_ref_instr   ref instruktor_type;
+        v_ref_pojazd  ref pojazd_type;
+        v_start_hour number;
+        v_end_hour   number;
+        v_data_start date;
     begin
+        
+    
+        if p_godziny < 1 or p_godziny > 4 then
+            raise_application_error(
+                -20100,
+                'Lekcja musi trwać od 1 do 4 godzin'
+            );
+        end if;
+    
+        if p_godzina_start < 8 or p_godzina_start >= 20 then
+            raise_application_error(
+                -20101,
+                'Godzina rozpoczęcia musi być w przedziale 08:00–20:00'
+            );
+        end if;
+    
+        v_end_hour := p_godzina_start + p_godziny;
+    
+        if v_end_hour > 20 then
+            raise_application_error(
+                -20102,
+                'Lekcja musi zakończyć się najpóźniej o 20:00'
+            );
+        end if;
+    
+    
+        v_data_start :=
+            trunc(p_data_jazdy) + (p_godzina_start / 24);
+    
+    
         select ref(i)
         into v_ref_instr
         from instruktorzy_tab i
@@ -139,13 +257,14 @@ create or replace package body szkola_jazdy_pkg as
         where p.nr_rejestracyjny = p_nr_rej
           and p.dostepny = 'tak';
     
+    
         update kursanci_tab k
         set k.historia_jazd =
             case
                 when k.historia_jazd is null then
                     lista_lekcji_type(
                         lekcja_type(
-                            p_data_jazdy,
+                            v_data_start,
                             p_godziny,
                             v_ref_instr,
                             v_ref_pojazd,
@@ -158,7 +277,7 @@ create or replace package body szkola_jazdy_pkg as
                     k.historia_jazd multiset union all
                     lista_lekcji_type(
                         lekcja_type(
-                            p_data_jazdy,
+                            v_data_start,
                             p_godziny,
                             v_ref_instr,
                             v_ref_pojazd,
@@ -171,9 +290,14 @@ create or replace package body szkola_jazdy_pkg as
         where k.nr_pkk = p_nr_pkk;
     
         if sql%rowcount = 0 then
-            raise_application_error(-20003, 'Nie znaleziono kursanta o podanym PKK.');
+            raise_application_error(
+                -20003,
+                'Nie znaleziono kursanta o podanym PKK.'
+            );
         end if;
     end dodaj_jazde;
+    
+
 
 
     

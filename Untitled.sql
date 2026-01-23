@@ -19,7 +19,7 @@ create table kursanci_tab of kursant_type (
 nested table historia_jazd store as historia_jazd_tab;
 
 alter table historia_jazd_tab add (
-    constraint chk_czas_trwania     check (czas_trwania between 1 and 4),
+      
     constraint chk_lekcja_odbyta    check (czy_odbyta in ('tak', 'nie')),
     constraint chk_typ_lekcji       check (typ_lekcji in ('miasto', 'plac')),
     
