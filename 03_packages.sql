@@ -1,6 +1,6 @@
--- =================================================================
+-----------------------------------------------------------------
 -- Pakiet do obsługi kursantów
--- =================================================================
+-----------------------------------------------------------------
 create or replace package kursant_pkg as
     procedure   zarejestruj(p_pkk varchar2, p_imie varchar2, p_nazwisko varchar2);
     
@@ -21,8 +21,8 @@ end kursant_pkg;
 /
 
 create or replace package body kursant_pkg as
+    
     procedure lista_kursantow is
-        v_znaleziono    boolean := false;
     begin
         dbms_output.put_line('---------------- LISTA KURSANTÓW ----------------');
     
@@ -35,19 +35,12 @@ create or replace package body kursant_pkg as
             from kursanci_tab k
             order by k.nazwisko, k.imie
         ) loop
-            v_znaleziono := true;
             dbms_output.put_line(
                 'PKK: ' || r.nr_pkk ||
                 ' | ' || r.imie || ' ' || r.nazwisko ||
                 ' | Godziny: ' || r.godziny
             );
         end loop;
-        
-        if not v_znaleziono then
-            dbms_output.put_line('(Brak zarejestrowanych kursantów)');
-        end if;
-        
-        dbms_output.put_line('-------------------------------------------------');
     end lista_kursantow;
 
 
@@ -80,10 +73,17 @@ create or replace package body kursant_pkg as
         v_pojazd_ref        ref pojazd_type;    
         v_godzina_start     number;
         v_godzina_koniec    number;
+        v_data_start        date;
         v_dostepny          pojazdy_tab.dostepny%type;
     begin
         if p_czas_trwania < 1 or p_czas_trwania > 4 then
             raise_application_error(-20100, '[Błąd] Lekcja musi trwać od 1 do 4 godzin');
+        end if;
+        if lower(p_typ_lekcji) not in ('miasto', 'plac') then
+            raise_application_error(
+                -20130,
+                '[Błąd] Niepoprawny typ lekcji. Dozwolone wartości: miasto, plac'
+            );
         end if;
     
         if p_godzina < 8 or p_godzina >= 19 then
@@ -95,7 +95,6 @@ create or replace package body kursant_pkg as
         if v_godzina_koniec > 20 then
             raise_application_error(-20102, '[Błąd] Lekcja musi zakończyć się najpóźniej o 20:00');
         end if;
-    
         begin
         select p.dostepny
             into v_dostepny
@@ -116,6 +115,8 @@ create or replace package body kursant_pkg as
             );
         end if;
     
+        v_data_start := trunc(p_data) + (p_godzina / 24);
+    
         select ref(i)
         into v_instr_ref 
         from instruktorzy_tab i
@@ -130,6 +131,7 @@ create or replace package body kursant_pkg as
             v_pojazd      pojazd_type;
             v_ilosc       number := 0;
         begin
+            -- pobranie obiektu pojazdu
             select deref(v_pojazd_ref)
             into v_pojazd
             from dual;
@@ -142,7 +144,11 @@ create or replace package body kursant_pkg as
             end if;
         
             if v_ilosc > 0 then
-                raise_application_error(-20110, '[Błąd] Pojazd ' || p_nr_rej || ' jest w serwisie w dniu ' || to_char(p_data, 'YYYY-MM-DD'));
+                raise_application_error(
+                    -20110,
+                    '[Błąd] Pojazd ' || p_nr_rej ||
+                    ' jest w serwisie w dniu ' || to_char(p_data, 'YYYY-MM-DD')
+                );
             end if;
         end;
     
@@ -152,28 +158,28 @@ create or replace package body kursant_pkg as
                 when k.historia_jazd is null then
                     lista_lekcji_type(
                         lekcja_type(
-                            p_data,
-                            p_godzina,
-                            p_czas_trwania,
-                            v_instr_ref,
-                            v_pojazd_ref,
-                            null,
-                            p_typ_lekcji,
-                            'nie'
+                            v_data_start,      -- data_jazdy
+                            p_godzina,         -- godzina_jazdy
+                            p_czas_trwania,    -- czas_trwania
+                            v_instr_ref,       -- ref_instruktor
+                            v_pojazd_ref,      -- ref_pojazd
+                            null,              -- przebieg_auta (jeszcze brak)
+                            p_typ_lekcji,      -- typ_lekcji
+                            'nie'              -- czy_odbyta
                         )
                     )
                 else
                     k.historia_jazd multiset union all
                     lista_lekcji_type(
                         lekcja_type(
-                            p_data,
-                            p_godzina,
-                            p_czas_trwania,
-                            v_instr_ref,
-                            v_pojazd_ref,
-                            null,
-                            p_typ_lekcji,
-                            'nie'
+                            v_data_start,      -- data_jazdy
+                            p_godzina,         -- godzina_jazdy
+                            p_czas_trwania,    -- czas_trwania
+                            v_instr_ref,       -- ref_instruktor
+                            v_pojazd_ref,      -- ref_pojazd
+                            null,              -- przebieg_auta (jeszcze brak)
+                            p_typ_lekcji,      -- typ_lekcji
+                            'nie'              -- czy_odbyta
                         )
                     )
             end
@@ -345,13 +351,13 @@ create or replace package body kursant_pkg as
 end kursant_pkg;
 /
 
--- =================================================================
+-----------------------------------------------------------------
 -- Pakiet do obsługi floty
--- =================================================================
+-----------------------------------------------------------------
 create or replace package flota_pkg as
     procedure   dodaj_pojazd(p_nr_rej varchar2, p_model varchar2, p_przebieg number);
     
-    procedure   sprawdz_serwis(p_nr_rej varchar2);
+    function    sprawdz_serwis(p_nr_rej varchar2) return varchar2;
     
     procedure   zmien_status(p_nr_rej varchar2, p_dostepnosc varchar2);
     
@@ -368,17 +374,19 @@ end flota_pkg;
 /
 
 create or replace package body flota_pkg as
-    
+
     procedure podmien_pojazd_w_lekcjach(p_nr_rej varchar2) is
         v_stary_ref   ref pojazd_type;
         v_nowy_ref    ref pojazd_type;
         v_znaleziono  boolean := false;
     begin
+        -- REF starego pojazdu
         select ref(p)
         into v_stary_ref
         from pojazdy_tab p
         where p.nr_rejestracyjny = p_nr_rej;
     
+        -- losowy dostępny pojazd ≠ stary
         select r
         into v_nowy_ref
         from (
@@ -390,6 +398,7 @@ create or replace package body flota_pkg as
         )
         where rownum = 1;
     
+        -- podmiana w lekcjach kursantów
         for k in (
             select rowid rid, value(c) kursant
             from kursanci_tab c
@@ -420,6 +429,9 @@ create or replace package body flota_pkg as
             );
     end podmien_pojazd_w_lekcjach;
 
+
+
+    
     procedure lista_serwisow(p_nr_rej varchar2) is
         v_pojazd pojazd_type;
     begin
@@ -464,16 +476,19 @@ create or replace package body flota_pkg as
     ) is
         v_pojazd pojazd_type;
     begin
+        -- pobranie obiektu pojazdu do modyfikacji
         select value(p)
         into v_pojazd
         from pojazdy_tab p
         where p.nr_rejestracyjny = p_nr_rej
         for update;
     
+        -- inicjalizacja historii serwisów, jeśli null
         if v_pojazd.historia_serwisow is null then
             v_pojazd.historia_serwisow := lista_serwisow_type();
         end if;
     
+        -- dodanie wpisu serwisowego
         v_pojazd.historia_serwisow.extend;
         v_pojazd.historia_serwisow(v_pojazd.historia_serwisow.count) :=
             serwis_type(
@@ -481,7 +496,8 @@ create or replace package body flota_pkg as
                 p_opis,
                 p_przebieg
             );
-
+    
+        -- zapis zmian do tabeli obiektowej
         update pojazdy_tab p
         set value(p) = v_pojazd
         where p.nr_rejestracyjny = p_nr_rej;
@@ -503,7 +519,6 @@ create or replace package body flota_pkg as
 
 
     procedure lista_pojazdow is
-        v_znaleziono    boolean := false;
     begin
         dbms_output.put_line('---------------- LISTA POJAZDÓW ----------------');
     
@@ -516,7 +531,6 @@ create or replace package body flota_pkg as
             from pojazdy_tab p
             order by p.nr_rejestracyjny
         ) loop
-            v_znaleziono := true;
             dbms_output.put_line(
                 'Nr rej: ' || r.nr_rejestracyjny ||
                 ' | Model: ' || r.model ||
@@ -524,12 +538,6 @@ create or replace package body flota_pkg as
                 ' | Dostępny: ' || r.dostepny
             );
         end loop;
-        
-        if not v_znaleziono then
-            dbms_output.put_line('(Brak pojazdów)');
-        end if;
-        
-        dbms_output.put_line('-------------------------------------------------');
     end lista_pojazdow;
 
 
@@ -552,7 +560,7 @@ create or replace package body flota_pkg as
             raise_application_error(-20001, '[Błąd] Pojazd o numerze rejestracyjnym ' || p_nr_rej || ' już istnieje');
     end dodaj_pojazd;
     
-    procedure sprawdz_serwis(p_nr_rej varchar2) is
+    function sprawdz_serwis(p_nr_rej varchar2) return varchar2 is
         aktualny_przebieg number;
         ostatni_serwis    number;
         limit             constant number := 15000;
@@ -563,12 +571,12 @@ create or replace package body flota_pkg as
     
         select nvl(max(s.przebieg), 0) into ostatni_serwis
         from pojazdy_tab p, table(p.historia_serwisow) s
-        where p.nr_rejestracyjny = p_nr_rej and s.opis = 'Przegląd okresowy';
+        where p.nr_rejestracyjny = p_nr_rej;
         
         if (aktualny_przebieg - ostatni_serwis) >= limit then
-             dbms_output.put_line('Pojazd wymaga serwisu, od ostatniego serwisu pojazd przejechał ' || to_char(aktualny_przebieg - ostatni_serwis) || ' km');
+             return 'Pojazd wymaga serwisu';
         else
-             dbms_output.put_line('Pojazd nie wymaga serwisu');
+             return 'Pojazd nie wymaga serwisu';
         end if;
         
     exception
@@ -579,36 +587,57 @@ create or replace package body flota_pkg as
     procedure zmien_status(p_nr_rej varchar2, p_dostepnosc varchar2) is
     begin
         if p_dostepnosc not in ('tak', 'nie') then
-             raise_application_error(-20003, '[Błąd] Status musi być "tak" lub "nie"');
+            raise_application_error(-20003, '[Błąd] Status musi być "tak" lub "nie"');
+        end if;
+    
+        if p_dostepnosc = 'nie' then
+            flota_pkg.podmien_pojazd_w_lekcjach(p_nr_rej);
         end if;
 
-        update pojazdy_tab 
-        set dostepny = p_dostepnosc 
+    
+        update pojazdy_tab
+        set dostepny = p_dostepnosc
         where nr_rejestracyjny = p_nr_rej;
-        
+    
         if sql%rowcount = 0 then
-            raise_application_error(-20002, '[Błąd] Nie znaleziono pojazdu o numerze rejestracyjnym ' || p_nr_rej);
+            raise_application_error(-20002, '[Błąd] Nie znaleziono pojazdu');
         end if;
-        
+    
         commit;
-        dbms_output.put_line('Zmieniono status pojazdu ' || p_nr_rej || ' na: ' || p_dostepnosc);
     end;
+
+
     
     procedure usun_pojazd(p_nr_rej varchar2) is
+        v_istnieje number;
     begin
-        delete pojazdy_tab
+        
+        select count(*)
+        into v_istnieje
+        from pojazdy_tab
         where nr_rejestracyjny = p_nr_rej;
     
-        if sql%rowcount = 0 then
-            raise_application_error(-20002, '[Błąd] Nie znaleziono pojazdu o numerze rejestracyjnym ' || p_nr_rej);
+        if v_istnieje = 0 then
+            raise_application_error(
+                -20002,
+                '[Błąd] Nie znaleziono pojazdu o numerze rejestracyjnym ' || p_nr_rej
+            );
         end if;
-    end;
+    
+        flota_pkg.podmien_pojazd_w_lekcjach(p_nr_rej);
+    
+        delete from pojazdy_tab
+        where nr_rejestracyjny = p_nr_rej;
+    
+    end usun_pojazd;
+
+
 end flota_pkg;
 /
 
--- =================================================================
+-----------------------------------------------------------------
 -- Pakiet do obsługi kadry
--- =================================================================
+-----------------------------------------------------------------
 create or replace package kadra_pkg as
     procedure   dodaj_instruktora(p_id number, p_imie varchar2, p_nazwisko varchar2);
     
@@ -624,7 +653,6 @@ end kadra_pkg;
 create or replace package body kadra_pkg as
 
     procedure lista_instruktorow is
-        v_znaleziono    boolean := false;
     begin
         dbms_output.put_line('---------------- LISTA INSTRUKTORÓW ----------------');
     
@@ -636,18 +664,11 @@ create or replace package body kadra_pkg as
             from instruktorzy_tab i
             order by i.nazwisko, i.imie
         ) loop
-            v_znaleziono := true;
             dbms_output.put_line(
                 'ID: ' || r.id_instruktora ||
                 ' | ' || r.imie || ' ' || r.nazwisko
             );
         end loop;
-        
-        if not v_znaleziono then
-            dbms_output.put_line('(Brak instruktorów)');
-        end if;
-        
-        dbms_output.put_line('-------------------------------------------------');
     end lista_instruktorow;
 
 
@@ -671,14 +692,33 @@ create or replace package body kadra_pkg as
     end dodaj_instruktora;
     
     procedure usun_instruktora(p_id number) is
+        v_ilosc number;
     begin
+        select count(*)
+        into v_ilosc
+        from kursanci_tab k,
+             table(k.historia_jazd) l
+        where deref(l.ref_instruktor).id_instruktora = p_id
+          and l.czy_odbyta = 'nie';
+    
+        if v_ilosc > 0 then
+            raise_application_error(
+                -20501,
+                '[Błąd] Nie można usunąć instruktora – posiada zaplanowane lekcje.'
+            );
+        end if;
+    
         delete from instruktorzy_tab
         where id_instruktora = p_id;
     
         if sql%rowcount = 0 then
-            raise_application_error(-20002, '[Błąd] Nie znaleziono instruktora o ID ' || p_id);
+            raise_application_error(
+                -20002,
+                '[Błąd] Nie znaleziono instruktora o ID ' || p_id
+            );
         end if;
     end usun_instruktora;
+
     
     procedure lista_lekcji(p_id varchar2) is
         v_instr_ref ref instruktor_type;
