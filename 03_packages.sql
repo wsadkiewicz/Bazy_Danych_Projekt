@@ -95,6 +95,29 @@ create or replace package body kursant_pkg as
         end if;
     
         v_godzina_koniec := p_godzina + p_czas_trwania;
+        
+        declare
+            v_kolizje number;
+        begin
+            select count(*)
+            into v_kolizje
+            from kursanci_tab k,
+                 table(k.historia_jazd) l
+            where deref(l.ref_instruktor).id_instruktora = p_id_instr
+              and trunc(l.data_jazdy) = trunc(p_data)
+              and l.czy_odbyta = 'nie'
+              and (
+                    l.godzina_jazdy < v_godzina_koniec
+                and (l.godzina_jazdy + l.czas_trwania) > p_godzina
+              );
+
+            if v_kolizje > 0 then
+                raise_application_error(
+                    -20140,
+                    '[Błąd] W tym terminie instruktor prowadzi inną lekcję'
+                );
+            end if;
+        end;
     
         if v_godzina_koniec > 20 then
             raise_application_error(-20102, '[Błąd] Lekcja musi zakończyć się najpóźniej o 20:00');
