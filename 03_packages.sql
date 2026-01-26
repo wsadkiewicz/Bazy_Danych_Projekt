@@ -80,6 +80,7 @@ create or replace package body kursant_pkg as
         v_pojazd_ref        ref pojazd_type;    
         v_godzina_start     number;
         v_godzina_koniec    number;
+        v_dostepny          pojazdy_tab.dostepny%type;
     begin
         if p_czas_trwania < 1 or p_czas_trwania > 4 then
             raise_application_error(-20100, '[Błąd] Lekcja musi trwać od 1 do 4 godzin');
@@ -93,6 +94,26 @@ create or replace package body kursant_pkg as
     
         if v_godzina_koniec > 20 then
             raise_application_error(-20102, '[Błąd] Lekcja musi zakończyć się najpóźniej o 20:00');
+        end if;
+    
+        begin
+        select p.dostepny
+            into v_dostepny
+            from pojazdy_tab p
+            where p.nr_rejestracyjny = p_nr_rej;
+        exception
+            when no_data_found then
+                raise_application_error(
+                    -20120,
+                    '[Błąd] Nie znaleziono pojazdu o numerze rejestracyjnym ' || p_nr_rej
+                );
+        end;
+        
+        if v_dostepny = 'nie' then
+            raise_application_error(
+                -20121,
+                '[Błąd] Pojazd ' || p_nr_rej || ' jest aktualnie niedostępny'
+            );
         end if;
     
         select ref(i)
@@ -134,25 +155,25 @@ create or replace package body kursant_pkg as
                             p_data,
                             p_godzina,
                             p_czas_trwania,
-                            v_instr_ref,       -- ref_instruktor
-                            v_pojazd_ref,      -- ref_pojazd
-                            null,              -- przebieg_auta (jeszcze brak)
-                            p_typ_lekcji,      -- typ_lekcji
-                            'nie'              -- czy_odbyta
+                            v_instr_ref,
+                            v_pojazd_ref,
+                            null,
+                            p_typ_lekcji,
+                            'nie'
                         )
                     )
                 else
                     k.historia_jazd multiset union all
                     lista_lekcji_type(
                         lekcja_type(
-                            p_data,            -- data_jazdy
-                            p_godzina,         -- godzina_jazdy
-                            p_czas_trwania,    -- czas_trwania
-                            v_instr_ref,       -- ref_instruktor
-                            v_pojazd_ref,      -- ref_pojazd
-                            null,              -- przebieg_auta (jeszcze brak)
-                            p_typ_lekcji,      -- typ_lekcji
-                            'nie'              -- czy_odbyta
+                            p_data,
+                            p_godzina,
+                            p_czas_trwania,
+                            v_instr_ref,
+                            v_pojazd_ref,
+                            null,
+                            p_typ_lekcji,
+                            'nie'
                         )
                     )
             end
@@ -330,7 +351,7 @@ end kursant_pkg;
 create or replace package flota_pkg as
     procedure   dodaj_pojazd(p_nr_rej varchar2, p_model varchar2, p_przebieg number);
     
-    procedure    sprawdz_serwis(p_nr_rej varchar2);
+    procedure   sprawdz_serwis(p_nr_rej varchar2);
     
     procedure   zmien_status(p_nr_rej varchar2, p_dostepnosc varchar2);
     
