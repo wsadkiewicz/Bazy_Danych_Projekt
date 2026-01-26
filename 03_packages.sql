@@ -284,6 +284,7 @@ create or replace package body kursant_pkg as
         v_kursant       kursant_type;
         v_suma          number;
         v_instruktor    varchar2(100);
+        v_data          date;
     begin
         begin
             select value(k) into v_kursant 
@@ -311,9 +312,10 @@ create or replace package body kursant_pkg as
     
         begin
             select 
-                t.ref_instruktor.imie || ' ' || t.ref_instruktor.nazwisko
+                t.ref_instruktor.imie || ' ' || t.ref_instruktor.nazwisko,
+                t.data_jazdy
             into 
-                v_instruktor
+                v_instruktor, v_data
             from 
                 TABLE(v_kursant.historia_jazd) t
             where 
@@ -338,7 +340,7 @@ create or replace package body kursant_pkg as
         dbms_output.put_line(' PODSUMOWANIE:');
         dbms_output.put_line(' ' || rpad('Suma godzin:', 20) || v_suma);
         dbms_output.put_line('------------------------------------------');
-        dbms_output.put_line(' ' || rpad('Data:', 20) || to_char(sysdate, 'YYYY-MM-DD'));
+        dbms_output.put_line(' ' || rpad('Data:', 20) || to_char(v_data, 'YYYY-MM-DD'));
         dbms_output.put_line(' ' || rpad('Instruktor:', 20) || v_instruktor);
        
     end wygeneruj_raport;
