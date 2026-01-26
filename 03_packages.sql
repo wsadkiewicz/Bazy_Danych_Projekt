@@ -280,7 +280,6 @@ create or replace package body kursant_pkg as
         v_kursant       kursant_type;
         v_suma          number;
         v_instruktor    varchar2(100);
-        v_data          date;
     begin
         begin
             select value(k) into v_kursant 
@@ -297,7 +296,7 @@ create or replace package body kursant_pkg as
     
         if v_suma < 30 then
             dbms_output.put_line('-----------------------------------------------');
-            dbms_output.put_line('Kursant nie posiada wymaganej liczby godzin');
+            dbms_output.put_line(' Kursant nie posiada wymaganej liczby godzin');
             dbms_output.put_line('-----------------------------------------------');
             dbms_output.put_line(' Kursant: ' || v_kursant.imie || ' ' || v_kursant.nazwisko);
             dbms_output.put_line('-----------------------------------------------');
@@ -308,10 +307,9 @@ create or replace package body kursant_pkg as
     
         begin
             select 
-                t.ref_instruktor.imie || ' ' || t.ref_instruktor.nazwisko,
-                t.data_jazdy
+                t.ref_instruktor.imie || ' ' || t.ref_instruktor.nazwisko
             into 
-                v_instruktor, v_data
+                v_instruktor
             from 
                 TABLE(v_kursant.historia_jazd) t
             where 
@@ -326,19 +324,17 @@ create or replace package body kursant_pkg as
         end;
     
         dbms_output.put_line('');
-        dbms_output.put_line('##########################################');
-        dbms_output.put_line('#        RAPORT UKOŃCZENIA KURSU         #');
-        dbms_output.put_line('##########################################');
-        dbms_output.put_line('');
+        dbms_output.put_line('==========================================');
+        dbms_output.put_line('         RAPORT UKOŃCZENIA KURSU          ');
+        dbms_output.put_line('==========================================');
         dbms_output.put_line(' DANE KURSANTA:');
         dbms_output.put_line(' ' || rpad('Imię i Nazwisko:', 20) || v_kursant.imie || ' ' || v_kursant.nazwisko);
         dbms_output.put_line(' ' || rpad('Numer PKK:', 20) || v_kursant.nr_pkk);
         dbms_output.put_line('------------------------------------------');
         dbms_output.put_line(' PODSUMOWANIE:');
         dbms_output.put_line(' ' || rpad('Suma godzin:', 20) || v_suma);
-        dbms_output.put_line(' ' || rpad('Status:', 20) || 'POZYTYWNY');
         dbms_output.put_line('------------------------------------------');
-        dbms_output.put_line(' ' || rpad('Data:', 20) || to_char(v_data, 'YYYY-MM-DD'));
+        dbms_output.put_line(' ' || rpad('Data:', 20) || to_char(sysdate, 'YYYY-MM-DD'));
         dbms_output.put_line(' ' || rpad('Instruktor:', 20) || v_instruktor);
        
     end wygeneruj_raport;
@@ -420,6 +416,7 @@ create or replace package body flota_pkg as
             );
     end podmien_pojazd_w_lekcjach;
 
+
     procedure lista_serwisow(p_nr_rej varchar2) is
         v_pojazd pojazd_type;
     begin
@@ -454,7 +451,6 @@ create or replace package body flota_pkg as
             );
     end lista_serwisow;
 
-    
 
     procedure zaplanuj_serwis(
         p_nr_rej    varchar2,
@@ -552,6 +548,7 @@ create or replace package body flota_pkg as
             raise_application_error(-20001, '[Błąd] Pojazd o numerze rejestracyjnym ' || p_nr_rej || ' już istnieje');
     end dodaj_pojazd;
     
+    
     procedure sprawdz_serwis(p_nr_rej varchar2) is
         aktualny_przebieg number;
         ostatni_serwis    number;
@@ -576,10 +573,15 @@ create or replace package body flota_pkg as
             raise_application_error(-20002, '[Błąd] Nie znaleziono pojazdu o numerze rejestracyjnym ' || p_nr_rej);
     end sprawdz_serwis;
     
+    
     procedure zmien_status(p_nr_rej varchar2, p_dostepnosc varchar2) is
     begin
         if p_dostepnosc not in ('tak', 'nie') then
              raise_application_error(-20003, '[Błąd] Status musi być "tak" lub "nie"');
+        end if;
+        
+        if p_dostepnosc = 'nie' then
+            podmien_pojazd_w_lekcjach(p_nr_rej);
         end if;
 
         update pojazdy_tab 
@@ -665,8 +667,7 @@ create or replace package body kadra_pkg as
         commit;
     
         dbms_output.put_line(
-            'Dodano instruktora: ID=' || p_id ||
-            ', ' || p_imie || ' ' || p_nazwisko
+            'Dodano instruktora: ' || p_imie || ' ' || p_nazwisko
         );
     end dodaj_instruktora;
     
@@ -699,6 +700,8 @@ create or replace package body kadra_pkg as
         for r in (
             select
                 k.nr_pkk,
+                k.imie,
+                k.nazwisko,
                 l.data_jazdy,
                 l.godzina_jazdy,
                 l.czas_trwania,
@@ -713,7 +716,7 @@ create or replace package body kadra_pkg as
             order by l.data_jazdy
         ) loop
             dbms_output.put_line(
-                'PKK: ' || r.nr_pkk ||
+                'PKK: ' || r.nr_pkk || ' | Imie: ' || r.imie || ' | Nazwisko: ' || r.nazwisko ||
                 ' | Data: ' || to_char(r.data_jazdy, 'yyyy-mm-dd') || ' ' || r.godzina_jazdy || ':00' ||
                 ' | Czas: ' || r.czas_trwania || 'h' ||
                 ' | Typ: ' || r.typ_lekcji ||
