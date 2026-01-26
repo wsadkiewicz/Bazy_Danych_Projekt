@@ -131,9 +131,9 @@ create or replace package body kursant_pkg as
                 when k.historia_jazd is null then
                     lista_lekcji_type(
                         lekcja_type(
-                            p_data,            -- data_jazdy
-                            p_godzina,         -- godzina_jazdy
-                            p_czas_trwania,    -- czas_trwania
+                            p_data,
+                            p_godzina,
+                            p_czas_trwania,
                             v_instr_ref,       -- ref_instruktor
                             v_pojazd_ref,      -- ref_pojazd
                             null,              -- przebieg_auta (jeszcze brak)
@@ -342,11 +342,63 @@ create or replace package flota_pkg as
     
     procedure   lista_serwisow(p_nr_rej varchar2);
     
+    procedure   podmien_pojazd_w_lekcjach(p_nr_rej varchar2);
 end flota_pkg;
 /
 
 create or replace package body flota_pkg as
     
+    procedure podmien_pojazd_w_lekcjach(p_nr_rej varchar2) is
+        v_stary_ref   ref pojazd_type;
+        v_nowy_ref    ref pojazd_type;
+        v_znaleziono  boolean := false;
+    begin
+        select ref(p)
+        into v_stary_ref
+        from pojazdy_tab p
+        where p.nr_rejestracyjny = p_nr_rej;
+    
+        select r
+        into v_nowy_ref
+        from (
+            select ref(p) as r
+            from pojazdy_tab p
+            where p.dostepny = 'tak'
+              and p.nr_rejestracyjny <> p_nr_rej
+            order by dbms_random.value
+        )
+        where rownum = 1;
+    
+        for k in (
+            select rowid rid, value(c) kursant
+            from kursanci_tab c
+        ) loop
+            if k.kursant.historia_jazd is not null then
+                for i in 1 .. k.kursant.historia_jazd.count loop
+                    if k.kursant.historia_jazd(i).ref_pojazd = v_stary_ref
+                       and k.kursant.historia_jazd(i).czy_odbyta = 'nie' then
+    
+                        k.kursant.historia_jazd(i).ref_pojazd := v_nowy_ref;
+                        v_znaleziono := true;
+                    end if;
+                end loop;
+    
+                if v_znaleziono then
+                    update kursanci_tab
+                    set historia_jazd = k.kursant.historia_jazd
+                    where rowid = k.rid;
+                end if;
+            end if;
+        end loop;
+    
+    exception
+        when no_data_found then
+            raise_application_error(
+                -20600,
+                '[Błąd] Brak dostępnego pojazdu do podmiany lekcji'
+            );
+    end podmien_pojazd_w_lekcjach;
+
     procedure lista_serwisow(p_nr_rej varchar2) is
         v_pojazd pojazd_type;
     begin
