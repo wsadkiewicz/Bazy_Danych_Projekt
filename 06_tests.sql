@@ -544,5 +544,21 @@ begin
 end;
 /
 
+-- TEST 50 – próba dodania jazdy, gdy instruktor ma już lekcję w tym terminie
+begin
+kursant_pkg.dodaj_jazde(
+        'PKK003','KR1000A',1,2,trunc(sysdate)+9,18,'plac'
+    );
+end;
+/
+
+begin
+    kursant_pkg.dodaj_jazde(
+        'PKK002','KR1000A',1,2,trunc(sysdate)+9,18,'plac'
+    );
+exception
+    when others then
+        dbms_output.put_line('OK 50: ' || sqlerrm);
+end;
 
 prompt === KONIEC  TESTÓW ===
